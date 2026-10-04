@@ -1,3 +1,5 @@
+<img width="1200" height="520" alt="umbrel2" src="https://github.com/user-attachments/assets/54c9fb6f-068c-4744-9a1e-df70e8c333f5" />
+
 # umbrelOS 2.0 for FriendlyElec NanoPi R5S (RK3568)
 
 > [!WARNING]
