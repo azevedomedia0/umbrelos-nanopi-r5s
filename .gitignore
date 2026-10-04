@@ -1,0 +1,14 @@
+# Disk and archive images (too large for git commits)
+*.img
+*.iso
+*.img.xz
+*.zip
+*.tar.gz
+*.bin
+*.ext4
+
+# Build and temporary files
+build/
+out/
+tmp/
+.DS_Store
