@@ -95,7 +95,18 @@ This method boots and runs umbrelOS 2.0 entirely off the MicroSD card without to
    # Default password: umbrel
    ```
 
+4. **Troubleshooting / Hotfix for Existing Installations**:
+   If you flashed an earlier release and encountered `"umbrelOS couldn't check your storage. Check again before making any changes."` during account setup, you do not need to reflash! You can apply the hotfix directly via SSH in seconds:
+   ```bash
+   ssh umbrel@umbrel.local
+   # Password: umbrel
+
+   curl -sL https://raw.githubusercontent.com/azevedomedia0/umbrelos-nanopi-r5s/main/scripts/apply-storage-hotfix.sh | sudo bash
+   ```
+   After running the script, refresh `http://umbrel.local` in your browser and submit your account credentials.
+
 ---
+
 
 ## Building From Source
 

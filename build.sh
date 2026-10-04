@@ -90,6 +90,139 @@ chmod 700 "${ROOTFS_DIR}/data/ssh"
 # Ensure docker group includes umbrel
 sed -i "s/^docker:x:987:.*$/docker:x:987:umbrel/" "${ROOTFS_DIR}/etc/group" || true
 
+# 5b. Configure sudoers for umbrel
+mkdir -p "${ROOTFS_DIR}/etc/sudoers.d"
+echo "umbrel ALL=(ALL) NOPASSWD: ALL" > "${ROOTFS_DIR}/etc/sudoers.d/umbrel"
+chmod 440 "${ROOTFS_DIR}/etc/sudoers.d/umbrel"
+
+# 5c. Patch umbreld modules for non-Rugix / Rockchip storage resolution
+echo ">>> Patching umbreld storage and hardware modules..."
+python3 - <<'PYEOF'
+import sys
+
+# Patch system-disk.ts
+sys_disk = "${ROOTFS_DIR}/opt/umbreld/source/modules/system/system-disk.ts"
+try:
+    with open(sys_disk, "r") as f:
+        content = f.read()
+
+    # 1. Update resolveSystemDiskNames signature and cycle handling
+    content = content.replace(
+        "export function resolveSystemDiskNames(\n\tsources: Array<string | undefined>,\n\tblockDevices: BlockDeviceRelation[],\n): Set<string> {",
+        "export function resolveSystemDiskNames(\n\tsources: Array<string | undefined>,\n\tblockDevices: BlockDeviceRelation[],\n\tisRugixSystem: boolean = false,\n): Set<string> {"
+    )
+    content = content.replace(
+        "if (!relations?.length) throw new Error(`Could not resolve system block device /dev/${deviceName}`)",
+        "if (!relations?.length) { if (!isRugixSystem) return new Set(); throw new Error(`Could not resolve system block device /dev/${deviceName}`) }"
+    )
+    content = content.replace(
+        "if (systemDisks.size === 0) throw new Error('Could not determine the physical disk backing the running system')",
+        "if (systemDisks.size === 0 && isRugixSystem) throw new Error('Could not determine the physical disk backing the running system')"
+    )
+    content = content.replace(
+        "{allowUnresolvedOutsideRugix = false}: {allowUnresolvedOutsideRugix?: boolean} = {}",
+        "{allowUnresolvedOutsideRugix = true}: {allowUnresolvedOutsideRugix?: boolean} = {}"
+    )
+    content = content.replace(
+        "return resolveSystemDiskNames(sources, blockDevices)",
+        "return resolveSystemDiskNames(sources, blockDevices, isRugixSystem)"
+    )
+
+    # 2. Add /dev/root fallback in getSystemDiskNames
+    root_fallback = """				if (!source || source === '/dev/root') {
+					try {
+						const stat = await fse.stat(systemPath)
+						const dev = BigInt(stat.dev)
+						const major = Number(((dev >> 8n) & 0xfffn) | ((dev >> 32n) & ~0xfffn))
+						const minor = Number((dev & 0xffn) | ((dev >> 12n) & ~0xfffn))
+						if (major > 0) {
+							const sysLink = await fse.readlink(`/sys/dev/block/${major}:${minor}`)
+							const kname = sysLink.split('/').pop()
+							if (kname) source = `/dev/${kname}`
+						}
+					} catch {}
+				}
+
+				if (!source || source === '/dev/root') {
+					try {
+						const {stdout} = await $`findmnt -T ${systemPath} -n -o SOURCE`
+						const found = stdout.trim()
+						if (found && found.startsWith('/dev/')) source = found
+					} catch {}
+				}"""
+
+    target_df = """				if (!source) throw new Error(`Could not determine the filesystem source for ${systemPath}`)"""
+    if target_df in content and root_fallback not in content:
+        content = content.replace(target_df, root_fallback + "\n\n" + target_df)
+
+    with open(sys_disk, "w") as f:
+        f.write(content)
+    print("  -> system-disk.ts patched")
+except Exception as e:
+    print(f"  -> Error patching system-disk.ts: {e}", file=sys.stderr)
+
+# Patch internal-storage.ts
+int_storage = "${ROOTFS_DIR}/opt/umbreld/source/modules/hardware/internal-storage.ts"
+try:
+    with open(int_storage, "r") as f:
+        content = f.read()
+
+    # Pass allowUnresolvedOutsideRugix: true
+    content = content.replace(
+        "const systemDiskNames = await getSystemDiskNames(this.#umbreld.dataDirectory)",
+        """let systemDiskNames = new Set<string>()
+		try {
+			systemDiskNames = await getSystemDiskNames(this.#umbreld.dataDirectory, {
+				allowUnresolvedOutsideRugix: true,
+			})
+		} catch (error) {
+			this.logger.error('Failed to resolve system disk names', error)
+		}"""
+    )
+    # Check both /dev/disk/by-umbrel-id and /dev/disk/by-id
+    content = content.replace(
+        "const byIdDir = '/dev/disk/by-umbrel-id'",
+        "for (const byIdDir of ['/dev/disk/by-umbrel-id', '/dev/disk/by-id'])"
+    )
+
+    with open(int_storage, "w") as f:
+        f.write(content)
+    print("  -> internal-storage.ts patched")
+except Exception as e:
+    print(f"  -> Error patching internal-storage.ts: {e}", file=sys.stderr)
+
+# Patch system.ts for NanoPi R5S hardware detection
+sys_ts = "${ROOTFS_DIR}/opt/umbreld/source/modules/system/system.ts"
+try:
+    with open(sys_ts, "r") as f:
+        content = f.read()
+
+    target_blank = "\t// Blank out model and serial for non Umbrel devices"
+    nanopi_detect = """\ttry {
+		if (await fse.pathExists('/proc/device-tree/model')) {
+			const dtModel = (await fse.readFile('/proc/device-tree/model', 'utf8')).replace(/\\0/g, '').trim()
+			if (dtModel.toLowerCase().includes('nanopi r5s') || dtModel.toLowerCase().includes('rk3568')) {
+				manufacturer = 'FriendlyElec'
+				productName = 'NanoPi R5S'
+				device = 'FriendlyElec NanoPi R5S'
+				deviceId = 'nanopi-r5s'
+			}
+		}
+	} catch (error) {}
+
+\t// Blank out model and serial for non Umbrel devices"""
+
+    if target_blank in content and "NanoPi R5S" not in content:
+        content = content.replace(target_blank, nanopi_detect, 1)
+
+    with open(sys_ts, "w") as f:
+        f.write(content)
+    print("  -> system.ts patched")
+except Exception as e:
+    print(f"  -> Error patching system.ts: {e}", file=sys.stderr)
+PYEOF
+
+
 # 6. Configure hostname and hosts
 echo "umbrel" > "${ROOTFS_DIR}/etc/hostname"
 cat > "${ROOTFS_DIR}/etc/hosts" <<'EOF'

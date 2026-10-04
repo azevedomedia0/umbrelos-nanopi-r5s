@@ -1,2 +1,2 @@
-e8fc9591e9258be2df9b0efb3735a62e6fa9976b92c44deb8c9ab5281b94d1c9  umbrelos-2.0.0-nanopi-r5s-sd.img
-9416b9fa2783f8ca926376e9a7b1b7f20a85e3174215d68a7362f619795c82b8  umbrelos-2.0.0-nanopi-r5s-eflasher.img
+eb4d3fdc7a01a5d2c266572eebe6ac4a5c3b7c0ae5597fdd7e552abe6f36df9c  umbrelos-2.0.0-nanopi-r5s-sd.img
+c07284fe3521cf5adc3cb9543fcddd4913b57a165cab2e50bd24099bc872a8f4  umbrelos-2.0.0-nanopi-r5s-eflasher.img
